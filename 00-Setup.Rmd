@@ -1,0 +1,87 @@
+---
+title: "Start here: install R, RStudio and the course packages"
+subtitle: "IILA | RTM practical in R | Argentina, 2026"
+author: "Carlos Camino González"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: cosmo
+    self_contained: true
+---
+
+```{r copy-code-buttons, echo=FALSE, results='asis'}
+copy_file <- c("copy-code.html", "../copy-code.html", "../../copy-code.html")
+copy_file <- copy_file[file.exists(copy_file)][1]
+if (is.na(copy_file)) stop("Could not find copy-code.html from the current working directory.")
+cat(readLines(copy_file, warn=FALSE), sep="\n")
+```
+
+## What you need
+
+This course was **tested end-to-end with R 4.5.1**. Install R 4.5.1 or a newer stable R release, plus a current stable **RStudio Desktop**. The [RTM-Suite installation page](https://rtm-suite.wur.nl/#install) lists a lower package minimum, but 4.5.1 is the version checked for this complete course. Install **R first**, then RStudio. You do not need Python or a paid account.
+
+1. Download R for your operating system from [CRAN](https://cran.r-project.org/). Windows users can choose [Download R for Windows](https://cran.r-project.org/bin/windows/base/); macOS users can choose [Download R for macOS](https://cran.r-project.org/bin/macosx/). Run the installer with its default options.
+2. Download the free [RStudio Desktop installer](https://posit.co/download/rstudio-desktop/) for your operating system and install it. [Posit's download guide](https://docs.posit.co/ide/user/download.html) explains the supported platforms.
+3. Open RStudio. In the Console, run `R.version.string`. It should show **R 4.5.1 or newer**. If RStudio found an older R, choose **Tools > Global Options > General > R version > Change**, select R 4.5.1, and restart RStudio. Run `R.version.string` again to check.
+
+## Open the course project
+
+Download or extract the complete `RTM-Practical-R` folder. Open `RTM-Practical-R.Rproj` by double-clicking it, or use **File > Open Project** in RStudio. Keep the `R`, `App`, `data`, `Exercises` and `Optional` subfolders together. Run `getwd()` in the Console: it should end in `RTM-Practical-R`. Work from this project rather than moving individual `.Rmd` files elsewhere.
+
+## Install packages once
+
+In the RStudio Console, run:
+
+```{r install, eval=FALSE}
+source("install_packages.R")
+```
+
+The script installs the packages for these three exercises, including Plotly for interactive spectra and indices, and the local Shiny app. It then installs **ToolsRTM** from its [GitLab source](https://gitlab.com/caminoccg/toolsrtm). It chooses Windows binary packages where available. An internet connection is needed once; the installation may take several minutes. `terra` and `jsonlite` are needed only if you choose to refresh the optional STAC series live. The saved real series opens without those packages. SCOPEinR and `sf` are not required for these practicals.
+
+Check the installation:
+
+```{r check, eval=FALSE}
+R.version.string
+packageVersion("ToolsRTM")
+packageVersion("randomForest")
+library(ToolsRTM)
+```
+
+If an installation fails, copy the first error message and ask the instructor. On Windows, if R asks to install packages from source and requests build tools, first try the precompiled binary offered by CRAN. If a GitLab download fails, check your internet connection and rerun `source("install_packages.R")`.
+
+## First activity: launch the simulator in RStudio
+
+Open `run_app.R` and click **Source** in RStudio. This runs the local app inside the downloaded project; it does not require a hosted server or an account. Alternatively type `shiny::runApp("App/RTMs")` in the Console. Wait for the Viewer or browser window to open. If the panel is narrow, use **Open in Browser**. Press **Stop** before running notebook chunks.
+
+Start in **Model Explorer > Simulation** with canopy model **fourSAIL** and leaf model **PROSPECT-D**. Change Cab and LAI one at a time. Exercise 1 then runs the same model in R.
+
+## Three exercises, about 70 minutes
+
+The simulator is a **forward model**: you choose plant properties and it predicts reflectance. First, PROSPECT calculates how a leaf absorbs and scatters light. Then fourSAIL combines those leaves with the canopy and soil. A Sentinel-2 spectral response function turns the detailed spectrum into the few band values a satellite would measure.
+
+**Exercise 1 (20 min):** explore the app, soil spectra and one canopy simulation. **Exercise 2 (20 min):** change traits one at a time, then compare with a random LUT where several traits vary together. **Exercise 3 (30 min):** use measured Achterhoek spectra to inspect vegetation indices against nitrogen, build a 500-row PROSAIL LUT, compare classical cost functions, and train `get.inversion()` Random Forest models to retrieve Cab, LAI and EWT from 10 nm reflectance bands plus selected indices. Compare retrieved Cab with measured N content, LAI with dry biomass, and EWT with fresh biomass. These are exploratory relationships because the field campaign did not measure Cab, LAI or EWT. The Argentina STAC time series remains an optional activity in `Optional/`.
+
+## How to work through an exercise
+
+Open `Exercises/01-Explore-Canopy.Rmd`. A `.Rmd` file mixes instructions, questions, R code and plots. Use the green **Run** button on a chunk to run it in the current R session. Write short answers under the questions. The supplied `_practical.html` file is a readable copy; edit the `.Rmd` in RStudio. Use **Knit** to make your own HTML. Run `source("render_exercises.R")` from the project root to rebuild the four handouts: setup plus three exercises.
+
+## Reopen the simulator later
+
+The local app is the `Apps/RTMs` simulator from RTM-Suite, copied into this project so it travels with the exercises. In the Console run:
+
+```{r shiny, eval=FALSE}
+shiny::runApp("App/RTMs")
+```
+
+In **PROSAIL-WithSatellite**, compare the continuous spectrum with Sentinel-2 bands after the first exploration. The app is the intended starting point; the R code provides a reproducible quantitative check. Close the app window or press **Stop** in RStudio before continuing.
+
+## Useful links
+
+- [RTM-Suite home and tutorials](https://rtm-suite.wur.nl/) — broader model and retrieval examples.
+- [ToolsRTM R reference](https://rtm-suite.wur.nl/toolsrtm/) — function documentation.
+- [How in R tutorial](https://rtm-suite.wur.nl/Tutorials/How-in-R.html) — the longer simulate/sweep/convolve/invert workflow that inspired these short course activities.
+
+## Sharing the project with the class
+
+The instructor can upload the **entire** `RTM-Practical-R` folder to the [course Google Drive folder](https://drive.google.com/drive/folders/1JdIGgzTBjqTVQyM7_beA8znYO33D9G0H?usp=sharing): in Drive select **New > Folder upload**, choose this folder, and wait for the upload to finish. Share the resulting folder link. Participants should download the folder (or a ZIP of it), extract it locally, and open the `.Rproj` file. Do not run the project directly from a browser preview in Drive.

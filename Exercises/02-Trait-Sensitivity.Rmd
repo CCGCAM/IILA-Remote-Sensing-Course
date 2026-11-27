@@ -1,0 +1,289 @@
+---
+title: "Exercise 2: Trait sensitivity and a simulation LUT"
+subtitle: "IILA | 20 minutes | R"
+author: "Carlos Camino González"
+output:
+  html_document:
+    toc: true
+    theme: cosmo
+    self_contained: true
+---
+
+**RTM-Suite:** [website](https://rtm-suite.wur.nl/) · [ToolsRTM documentation](https://rtm-suite.wur.nl/toolsrtm/)
+
+```{r copy-code-buttons, echo=FALSE, results='asis'}
+copy_file <- c("copy-code.html", "../copy-code.html", "../../copy-code.html")
+copy_file <- copy_file[file.exists(copy_file)][1]
+if (is.na(copy_file)) stop("Could not find copy-code.html from the current working directory.")
+cat(readLines(copy_file, warn=FALSE), sep="\n")
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE,
+                      fig.width=8, fig.height=4)
+```
+
+```{=html}
+<style>.question{background-color:#e4ecf2;border-left:5px solid #1a5276;color:#14374f;padding:.75em 1em;margin:1em 0;border-radius:4px}</style>
+```
+
+**Goal:** Compare how leaf and canopy traits affect reflectance, then see how these effects change when traits vary together. You can reopen the simulator at any time. No files need to be saved. [Exercise 1](01-Explore-Canopy_practical.html) introduced one forward simulation.
+
+## 1. Reopen the simulator if needed (2 minutes)
+
+Use the app to revisit the model controls from Exercise 1 or demonstrate a trait change. If it is already open, continue below. This chunk starts the same RTM Suite app; it does not change the R code or LUT.
+
+```{r app, eval=FALSE}
+# Find the app folder relative to the course root or Exercises folder.
+app_dir <- if (dir.exists("App/RTMs")) "App/RTMs" else "../App/RTMs"
+shiny::runApp(app_dir)
+```
+
+```{block, type="question"}
+> **Question 1.** In the app, change Cab and then LAI separately. Which parts of the spectrum appear to respond to each change? You will test those patterns with R in the next section.
+```
+
+## 2. Make a LUT and inspect trait sensitivity (6 minutes)
+
+First build a small LUT to describe a controlled set of simulations. Each row is one canopy run. In this example Cab changes from 10 to 80 and the other inputs stay fixed. The table lets you inspect and sort the inputs. This follows [course example 5a](../../examples/Tutorials/excercise5a.html).
+
+```{r input-lut}
+# Set how many Cab values the LUT will contain.
+nSamples <- 10  # try 100 later for a smoother set of curves
+# List the traits used in the one-at-a-time comparison below.
+plant.traits <- c("LAI", "Cab", "Cbrown", "EWT", "psoil")
+# Create one row per run and fill each column with model inputs.
+df.LUT <- data.frame(matrix(ncol=0, nrow=nSamples))
+df.LUT$N <- 1.5
+# Spread Cab evenly across its range; keep the remaining traits fixed.
+df.LUT$Cab <- round(seq(10, 80, length.out=nSamples), 1)
+df.LUT$Car <- 8; df.LUT$Anth <- 2; df.LUT$Cbrown <- 0
+df.LUT$alpha <- 40; df.LUT$EWT <- 0.009; df.LUT$LMA <- 0.012
+df.LUT$Prot <- 0; df.LUT$CBC <- 0; df.LUT$LAI <- 4
+df.LUT$TypeLidf <- 1; df.LUT$LIDFa <- -0.35
+df.LUT$LIDFb <- -0.15; df.LUT$hspot <- 0.01
+df.LUT$tts <- 30; df.LUT$tto <- 0; df.LUT$psi <- 0
+df.LUT$psoil <- 0.5
+# Display the trait columns so you can inspect the LUT rows.
+DT::datatable(round(df.LUT[, plant.traits], 3),
+              options=list(pageLength=10), rownames=FALSE,
+              caption="Input LUT: one row per canopy simulation")
+```
+
+The next chunk compares one trait at a time. It starts from the middle LUT row, then changes Cab, EWT or LAI while holding other inputs at that reference value. Hover over a curve to read reflectance at a wavelength; zoom in to inspect visible, red-edge, NIR or water-absorption regions. To vary LAI in the LUT yourself, replace the Cab sequence with `df.LUT$LAI <- seq(0.5, 6, length.out=nSamples)` and set `df.LUT$Cab <- 40`. See the longer [RTM-Sens example](../Optional/Extended-Trait-Sensitivity.html).
+
+```{r reference}
+# Load the wavelength grid and define the example soil mixture.
+data_light <- ToolsRTM::dataSpec_PDB
+wl <- data_light$wavelength
+rsoil <- 0.5 * data_light$dry_soil + 0.5 * data_light$wet_soil
+# Use a middle LUT row as the baseline for the controlled sweeps.
+reference <- df.LUT[ceiling(nrow(df.LUT)/2), , drop=FALSE]
+```
+
+```{r sweeps, results='asis'}
+# Define a small range for each trait; only one changes per plot.
+sweep_values <- list(Cab=c(10, 30, 50, 70),
+                     EWT=c(0.005, 0.01, 0.02, 0.03),
+                     LAI=c(0.5, 2, 4, 6))
+plots <- list()
+for (trait in names(sweep_values)) {
+  values <- sweep_values[[trait]]
+  # Copy the same baseline row and vary only the current trait.
+  curves <- sapply(values, function(value) {
+    row <- reference
+    row[[trait]] <- value
+    sail <- ToolsRTM::foursail(inputLUT=row, rsoil=rsoil,
+                              LeafModel="PROSPECT-D")
+    as.numeric(ToolsRTM::Compute_BRF(
+      rdot=sail$rdot, rsot=sail$rsot,
+      tts=row$tts, data.light=data_light))
+  })
+  plot_data <- data.frame(
+    wavelength=rep(wl, times=length(values)),
+    reflectance=as.vector(curves),
+    value=factor(rep(values, each=length(wl)), levels=values))
+  plots[[trait]] <- plotly::plot_ly(
+    plot_data, x=~wavelength, y=~reflectance, color=~value,
+    colors=c("#0072B2", "#D55E00", "#009E73", "#CC79A7"),
+    type="scatter", mode="lines",
+    hovertemplate=paste(trait, "= %{legendgroup}<br>%{x} nm<br>Reflectance: %{y:.3f}<extra></extra>")) |>
+    plotly::layout(title=paste("Sensitivity to", trait),
+                   xaxis=list(title="Wavelength (nm)"),
+                   yaxis=list(title="Canopy reflectance"),
+                   legend=list(title=list(text=trait))) |>
+    plotly::config(displayModeBar=FALSE, displaylogo=FALSE,
+                   responsive=TRUE)
+}
+htmltools::tagList(plots)
+```
+
+```{block, type="question"}
+> **Question 2.** Compare the Cab, EWT and LAI plots. Which wavelengths respond most to Cab? Where does EWT have its clearest effect? Which trait changes the NIR plateau most? Explain each choice using a curve from the plots.
+```
+
+## 3. Simulate every LUT row (3 minutes)
+
+Now run the forward model for every LUT row. The loop uses the same `foursail()` and `Compute_BRF()` calls as Exercise 1; it stores one detailed spectrum (400–2500 nm) per row. The plot shows eight example curves and the mean spectrum so the full LUT is easier to read.
+
+```{r simulate-lut}
+# Allocate one output row per LUT case and one column per wavelength.
+spectra <- t(vapply(seq_len(nrow(df.LUT)), function(i) {
+  # Read this simulation's inputs and mix its dry/wet soil background.
+  row <- df.LUT[i, , drop=FALSE]
+  soil_i <- row$psoil * data_light$dry_soil +
+            (1 - row$psoil) * data_light$wet_soil
+  # Run the leaf and canopy models, then calculate the BRF spectrum.
+  sail <- ToolsRTM::foursail(inputLUT=row, rsoil=soil_i,
+                            LeafModel="PROSPECT-D")
+  as.numeric(ToolsRTM::Compute_BRF(
+    rdot=sail$rdot, rsot=sail$rsot,
+    tts=row$tts, data.light=data_light))
+}, numeric(length(wl))))
+
+# Select up to eight LUT cases for display; all cases contribute to the mean.
+sample_rows <- unique(round(seq(1, nrow(spectra), length.out=8)))
+sample_colours <- c("#0072B2", "#D55E00", "#009E73", "#CC79A7",
+                    "#E69F00", "#332288", "#88CCEE", "#882255")
+spectra_long <- data.frame(
+  wavelength=rep(wl, times=length(sample_rows)),
+  reflectance=as.vector(t(spectra[sample_rows, , drop=FALSE])),
+  simulation=factor(rep(paste("LUT row", sample_rows), each=length(wl)))
+)
+mean_spectrum <- data.frame(wavelength=wl, reflectance=colMeans(spectra))
+# Plot sample spectra and their mean to show the spread across the LUT.
+plotly::plot_ly(spectra_long, x=~wavelength, y=~reflectance,
+                color=~simulation, colors=sample_colours,
+                type="scatter", mode="lines",
+                hovertemplate="%{fullData.name}<br>%{x} nm<br>Reflectance: %{y:.3f}<extra></extra>") |>
+  plotly::add_lines(data=mean_spectrum, x=~wavelength, y=~reflectance,
+                    name="Mean", inherit=FALSE,
+                    line=list(color="black", width=4)) |>
+  plotly::layout(title=paste(nrow(spectra), "simulated canopies"),
+                 xaxis=list(title="Wavelength (nm)"),
+                 yaxis=list(title="Canopy reflectance")) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+```{block, type="question"}
+> **Question 3.** What does one plotted curve represent, and what does the black mean curve summarize? To use 100 cases, change `nSamples` in `input-lut`, then rerun `input-lut`, `reference`, `sweeps` and `simulate-lut`. What changes in the LUT and mean spectrum? Which spectral regions show the widest spread?
+```
+
+## 4. Convolve spectra to a satellite sensor (4 minutes)
+
+Convolution turns a detailed model spectrum into the band values a satellite would measure. Each band value is a weighted average using that sensor's spectral response function (SRF); it is not a simple average of nearby wavelengths. Choose a sensor below and compare its band values with the full spectrum. The spaces between band centres represent spectral information the sensor does not record.
+
+`get.spectral.convolution.rfl()` supports the bundled Landsat 4/5/7/8, Sentinel-2A/B, Sentinel-3A/B and MODIS sensors. For PRISMA and the publisher SRF tables for Sentinel-2A/B, ToolsRTM also provides `get.spectral.convolution.srf()`.
+
+```{r sentinel-bands}
+# Change this name to compare another sensor supported by ToolsRTM.
+sensor_name <- "Sentinel2A.MSI"  # e.g. "LANDSAT8.OLI" or "TerraAqua.MODIS"
+# Load the selected sensor's bundled response data from the ToolsRTM package.
+sensor_data <- new.env()
+utils::data(list=sensor_name, package="ToolsRTM", envir=sensor_data)
+sensor_object <- get(sensor_name, envir=sensor_data)
+# Convolve one LUT spectrum to the selected sensor's bands.
+spectrum_input <- data.frame(wave=wl, rfl=spectra[1, ])
+band_example <- ToolsRTM::get.spectral.convolution.rfl(
+  df=spectrum_input, sensor.i=sensor_object, get.plots=FALSE)
+band_names <- paste0("Band_", sprintf("%02d", seq_len(nrow(band_example))),
+                     "_", round(band_example$wave), "nm")
+# Overlay the convolved band values on the original detailed spectrum.
+plotly::plot_ly() |>
+  plotly::add_lines(x=wl, y=spectra[1, ], name="Full model spectrum",
+                    line=list(color="#555555", width=2),
+                    hovertemplate="%{x} nm<br>Reflectance: %{y:.3f}<extra></extra>") |>
+  plotly::add_markers(x=band_example$wave, y=band_example$RFL,
+                      name=paste(sensor_name, "bands"), text=band_names,
+                      marker=list(color="#0072B2", size=9, symbol="diamond"),
+                      hovertemplate="%{text}<br>Centre: %{x:.1f} nm<br>Band reflectance: %{y:.3f}<extra></extra>") |>
+  plotly::layout(title=paste("One canopy spectrum and", sensor_name, "bands"),
+                 xaxis=list(title="Wavelength (nm)"),
+                 yaxis=list(title="Reflectance"),
+                 legend=list(title=list(text=""))) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+
+# Convolve each LUT spectrum to build a sensor-specific band-level LUT.
+bands <- matrix(NA_real_, nrow=nrow(spectra), ncol=length(band_names))
+for (i in seq_len(nrow(spectra))) {
+  band_values <- ToolsRTM::get.spectral.convolution.rfl(
+    df=data.frame(wave=wl, rfl=spectra[i, ]),
+    sensor.i=sensor_object, get.plots=FALSE)
+  bands[i, ] <- band_values$RFL
+}
+colnames(bands) <- band_names
+lut <- data.frame(df.LUT, bands)
+# Show traits and a few convolved bands; all bands remain in the LUT.
+shown_columns <- c("Cab", "EWT", "LAI", head(band_names, 2))
+knitr::kable(head(lut[shown_columns], 5), digits=3,
+             caption=paste("Traits and", sensor_name, "band reflectances"))
+```
+
+```{block, type="question"}
+> **Question 4.** How many band values does the sensor retain compared with the full spectrum? Which spectral details are lost after convolution? Change `sensor_name` to `"LANDSAT8.OLI"` and rerun this chunk: how does its coverage differ? Which table columns are traits and which are band reflectances? In Exercise 3, the same convolution idea is applied to measured field spectra before predicting nitrogen.
+```
+
+## 5. Global spectral sensitivity (5 minutes)
+
+The previous plots changed one trait at a time. Now ToolsRTM varies every trait listed in the table together, plus a soil-brightness multiplier. Uniform sampling draws values across each range, so Cab, EWT and LAI are not held at the earlier LUT values. The RTM, sun/viewing geometry and soil spectrum shape remain the same. Because this exercise uses PROSPECT-D, Prot and CBC are not varied; they are inputs for PROSPECT-PRO. The plot shows normalized Johnson importance: each input's relative share of spectral variability at a wavelength. The shares depend on the input ranges and distribution; they are not universal causal effects or full Sobol total-effect estimates.
+
+```{r global-ranges}
+# Select continuous pigment, water, dry-matter, structure and canopy traits.
+sensitivity_traits <- c("N", "Cab", "Car", "Anth", "Cbrown", "EWT",
+                        "LMA", "alpha", "LIDFa",
+                        "LAI", "hspot")
+# Read the model's default bounds so the sampled ranges are visible.
+range_inputs <- ToolsRTM::inputsPROSAIL
+range_inputs <- range_inputs[match(sensitivity_traits, range_inputs$variable), ]
+range_table <- data.frame(
+  Trait=range_inputs$variable,
+  Lower=as.numeric(range_inputs$lower),
+  Upper=as.numeric(range_inputs$upper),
+  Units=range_inputs$units
+)
+# SoilCoef scales the baseline soil spectrum from 0.5 to 1.5.
+range_table <- rbind(range_table,
+                     data.frame(Trait="SoilCoef", Lower=0.5, Upper=1.5,
+                                Units="soil multiplier"))
+DT::datatable(range_table, options=list(pageLength=15, scrollX=TRUE),
+              rownames=FALSE, caption="Inputs varied in the global analysis")
+```
+
+```{r global-sensitivity}
+# Choose Uniform or Gaussian. One hundred runs keeps this exercise quick;
+# increase to 500 if you have extra time and want a more stable comparison.
+sensitivity_distribution <- "Uniform"
+n_global_samples <- 100
+# SoilCoef is added by this function to vary soil brightness as well.
+global_sensitivity <- ToolsRTM::get.spectral.sensitivity(
+  n.samples=n_global_samples, distribution=sensitivity_distribution,
+  leaf.model="PROSPECT-D", canopy.model="fourSAIL",
+  rsoil.base=rsoil, wl.step=25, seed=42,
+  n.cores=2, chunk.size=50)
+```
+
+```{r global-sensitivity-plot}
+# Keep the trait stacking and legend order consistent between runs.
+global_sensitivity$trait <- factor(
+  global_sensitivity$trait,
+  levels=c(sensitivity_traits, "SoilCoef"))
+plotly::plot_ly(global_sensitivity,
+                x=~wavelength, y=~STi_pct, color=~trait,
+                colors=c("#4C78A8", "#F58518", "#54A24B", "#E45756",
+                         "#B279A2", "#FF9DA6", "#9D755D", "#BAB0AC",
+                         "#72B7B2", "#EECA3B", "#B2DF8A", "#FB9A99",
+                         "#CAB2D6", "#A6CEE3", "#777777"),
+                type="scatter", mode="none", stackgroup="one",
+                hovertemplate="%{x} nm<br>%{fullData.name}: %{y:.1f}%<extra></extra>") |>
+  plotly::layout(title="Trait contribution to spectral variability",
+                 xaxis=list(title="Wavelength (nm)"),
+                 yaxis=list(title="Contribution (%)", range=c(0, 100)),
+                 legend=list(title=list(text="Trait"))) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+```{block, type="question"}
+> **Question 5.** At which wavelengths do pigments, water, canopy structure and soil brightness contribute most to the simulated variability? Compare this plot with your one-trait sweeps. Change `sensitivity_distribution` to `"Gaussian"` and rerun `global-sensitivity` and `global-sensitivity-plot`. If time allows, increase `n_global_samples` to 500. How do the results change? Why should you report the input ranges and distribution?
+```
+
+Go back to [Exercise 1: explore the simulator](01-Explore-Canopy_practical.html), or continue to [Exercise 3: field spectra and vegetation trait inversion](03-Field-Spectra-and-Trait-Inversion_practical.html).

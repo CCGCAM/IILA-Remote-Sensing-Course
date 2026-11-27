@@ -1,0 +1,134 @@
+---
+title: "IILA | Vegetation Remote Sensing and Radiative Transfer Modelling"
+output: github_document
+---
+
+<!-- Generated from README.Rmd. Edit the RMarkdown source rather than README.md. -->
+
+**From spectral measurements to vegetation trait retrieval**
+
+IILA Training Course | Córdoba, Argentina | 2026
+
+[![RTM-Suite](https://img.shields.io/badge/Framework-RTM--Suite-287D46)](https://rtm-suite.wur.nl/) [![R](https://img.shields.io/badge/Language-R-276DC3)](https://www.r-project.org/) [![ToolsRTM](https://img.shields.io/badge/Package-ToolsRTM-287D46)](https://rtm-suite.wur.nl/toolsrtm/)
+
+## Overview
+
+This repository provides hands-on training materials for vegetation remote sensing, radiative transfer modelling (RTM), spectral sensitivity analysis and plant trait retrieval using R and RTM-Suite.
+
+The practical session combines physically based simulations with field hyperspectral observations and machine learning. Participants progress from understanding soil, leaf and canopy optical properties to retrieving vegetation traits from measured reflectance spectra.
+
+## Learning objectives
+
+- Understand how soil, leaf and canopy properties influence vegetation reflectance.
+- Perform forward simulations using PROSPECT and fourSAIL (PROSAIL).
+- Generate synthetic look-up tables (LUTs).
+- Explore individual trait effects and global spectral sensitivity.
+- Convolve hyperspectral simulations to satellite sensor spectral bands.
+- Investigate relationships between spectral indices and measured nitrogen.
+- Compare classical LUT inversion and Random Forest retrieval approaches.
+
+## Practical exercises
+
+| Exercise | Topic | Duration |
+|:--|:--|--:|
+| 01 | [From soil and leaf to canopy reflectance](Exercises/01-Explore-Canopy.Rmd) | 20 min |
+| 02 | [Trait sensitivity and a simulation LUT](Exercises/02-Trait-Sensitivity.Rmd) | 20 min |
+| 03 | [Field spectra and vegetation trait inversion](Exercises/03-Field-Spectra-and-Trait-Inversion.Rmd) | 30 min |
+| | **Total** | **70 min** |
+
+### Exercise 1 — Explore canopy reflectance
+
+Explore the RTM-Suite interactive simulator, generate a small LUT, compare measured and simulated soil spectra, and investigate how leaf chlorophyll content (Cab) and leaf area index (LAI) influence canopy reflectance.
+
+### Exercise 2 — Trait sensitivity
+
+Perform controlled trait sweeps, simulate a LUT, convolve hyperspectral reflectance to satellite spectral bands and investigate global spectral sensitivity when multiple model inputs vary together.
+
+### Exercise 3 — Field spectra and vegetation trait inversion
+
+Analyse hyperspectral measurements from 40 plots in a grazed fen meadow in the Achterhoek, the Netherlands. Explore nitrogen-related spectral indices, generate a 500-row PROSAIL LUT, compare classical inversion cost functions and train Random Forest models to retrieve:
+
+- **Cab:** leaf chlorophyll content.
+- **LAI:** leaf area index.
+- **EWT:** equivalent water thickness.
+
+Apply the inversion models to field spectra and explore relationships between retrieved traits, measured nitrogen and biomass.
+
+## Conceptual workflow
+
+```text
+Soil, leaf and canopy properties
+              |
+              v
+      PROSAIL forward model
+              |
+              v
+   Synthetic spectra and LUTs
+              |
+              v
+ Spectral sensitivity and sensor convolution
+              |
+              v
+   Classical / Random Forest inversion <--- Field spectra
+              |
+              v
+     Vegetation trait retrieval
+              |
+              v
+ Relationships with nitrogen and biomass
+```
+
+## Getting started
+
+1. Install [R](https://www.r-project.org/) and [RStudio](https://posit.co/download/rstudio-desktop/).
+2. Download or clone this repository using **Code > Download ZIP** or Git.
+3. Extract the complete repository, preserving its folder structure.
+4. Open the course setup guide (`00-Setup_practical.html`) and follow the package installation instructions.
+5. Open the first RMarkdown exercise in RStudio.
+6. Run the code chunks sequentially and complete the practical questions.
+
+The interactive simulator is launched from the exercises using `shiny::runApp()`. Run the simulator chunk manually rather than during knitting.
+
+## Repository structure
+
+The following layout is recommended to preserve the relative paths used in the exercises:
+
+```text
+IILA-RTM-Training/
+├── README.Rmd
+├── README.md
+├── 00-Setup_practical.html
+├── copy-code.html
+├── Exercises/
+│   ├── 01-Explore-Canopy.Rmd
+│   ├── 02-Trait-Sensitivity.Rmd
+│   └── 03-Field-Spectra-and-Trait-Inversion.Rmd
+├── App/
+│   └── RTMs/
+└── data/
+    ├── soil_spectrum_bablet_ID1.csv
+    ├── Achterhoek_FieldSpec_2008.csv
+    └── Achterhoek_FieldSpec_2008_field_sampling.csv
+```
+
+## Software and resources
+
+- [RTM-Suite](https://rtm-suite.wur.nl/) — radiative transfer modelling framework.
+- [ToolsRTM documentation](https://rtm-suite.wur.nl/toolsrtm/) — forward modelling, sensitivity analysis and inversion in R.
+- [R](https://www.r-project.org/) — statistical computing environment.
+- [RStudio](https://posit.co/download/rstudio-desktop/) — development environment for R.
+
+## Instructor
+
+**Dr. Carlos Camino González**  
+Assistant Professor | Radiative Transfer Modelling and Remote Sensing  
+Laboratory of Geo-information Science and Remote Sensing  
+Wageningen University & Research, The Netherlands
+
+## Acknowledgements
+
+These materials have been prepared for the IILA training course in Córdoba, Argentina, to support knowledge exchange and capacity building in vegetation remote sensing and physically based modelling.
+
+## Citation and reuse
+
+If you use or adapt these training materials, please acknowledge the author, the IILA training course and the RTM-Suite framework. Please respect the original data and software licensing conditions.

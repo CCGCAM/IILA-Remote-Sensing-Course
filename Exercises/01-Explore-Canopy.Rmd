@@ -1,0 +1,214 @@
+---
+title: "Exercise 1: From soil and leaf to canopy reflectance"
+subtitle: "IILA | 20 minutes | R"
+author: "Carlos Camino González"
+output:
+  html_document:
+    toc: true
+    theme: cosmo
+    self_contained: true
+---
+
+**RTM-Suite:** [website](https://rtm-suite.wur.nl/) · [ToolsRTM documentation](https://rtm-suite.wur.nl/toolsrtm/)
+
+```{r copy-code-buttons, echo=FALSE, results='asis'}
+copy_file <- c("copy-code.html", "../copy-code.html", "../../copy-code.html")
+copy_file <- copy_file[file.exists(copy_file)][1]
+if (is.na(copy_file)) stop("Could not find copy-code.html from the current working directory.")
+cat(readLines(copy_file, warn=FALSE), sep="\n")
+```
+
+```{r setup, include=FALSE}
+# Set consistent display options for code and figures throughout the exercise.
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE,
+                      fig.width=8, fig.height=4)
+```
+
+```{=html}
+<style>.question{background-color:#e4ecf2;border-left:5px solid #1a5276;color:#14374f;padding:.75em 1em;margin:1em 0;border-radius:4px}</style>
+```
+
+**Goal:** Run one classical PROSAIL simulation and identify what comes from the soil, leaf and canopy. Open the [setup guide](../00-Setup_practical.html) first. All code uses [ToolsRTM](https://rtm-suite.wur.nl/toolsrtm/).
+
+## 1. Explore the app (5 minutes)
+
+Start with the simulator to see how a single change in a leaf or canopy input affects the spectrum. This gives you a visual reference before you create many simulations in R.
+
+In RStudio, run this chunk with its green **Run** arrow. Select **Model Explorer**, **fourSAIL** and **PROSPECT-D**. Move `Cab` and `LAI` one at a time. Press **Stop** when finished. The chunk is not run when you knit the document.
+
+```{r app, eval=FALSE}
+# Locate the RTM Suite app relative to this exercise, then launch it in RStudio.
+app_dir <- if (dir.exists("App/RTMs")) "App/RTMs" else "../App/RTMs"
+shiny::runApp(app_dir)
+```
+
+## 2. Make a small LUT (4 minutes)
+
+Next, describe a set of model runs in a lookup table (LUT), so you can compare many spectra in one step. One row is one canopy simulation. Choose a trait and a sampling distribution below; the table and histogram show the values that will be used. All other traits stay fixed.
+
+```{r lut}
+# Set the LUT size and choose the one trait and distribution to vary.
+nSamples <- 100  # number of rows, and therefore forward simulations
+plant.traits <- c("LAI", "Cab", "Cbrown", "EWT", "psoil")
+depVar <- "Cab"  # choose: "LAI", "Cab", "Cbrown", "EWT" or "psoil"
+distribution <- "Uniform"  # choose "Uniform" or "Gaussian"
+psoil_value <- 0.5  # fixed dry-soil fraction when psoil is not the selected trait
+# Create one row per simulation, then fill each column with model inputs.
+df.LUT <- data.frame(matrix(ncol=0, nrow=nSamples))
+df.LUT$N <- 1.5
+df.LUT$Cab <- 40
+df.LUT$Car <- 8; df.LUT$Anth <- 2; df.LUT$Cbrown <- 0
+df.LUT$alpha <- 40; df.LUT$EWT <- 0.009; df.LUT$LMA <- 0.012
+df.LUT$Prot <- 0; df.LUT$CBC <- 0; df.LUT$LAI <- 4
+df.LUT$TypeLidf <- 1; df.LUT$LIDFa <- -0.35
+df.LUT$LIDFb <- -0.15; df.LUT$hspot <- 0.01
+df.LUT$tts <- 30; df.LUT$tto <- 0; df.LUT$psi <- 0
+df.LUT$psoil <- psoil_value
+
+# Define plausible ranges for the traits students can vary.
+trait_ranges <- list(
+  LAI=c(0.5, 6), Cab=c(10, 80), Cbrown=c(0, 0.5),
+  EWT=c(0.005, 0.03), psoil=c(0, 1))
+stopifnot(depVar %in% names(trait_ranges))
+limits <- trait_ranges[[depVar]]
+# Draw reproducible values so the same settings give the same LUT.
+set.seed(42)
+if (distribution == "Uniform") {
+  df.LUT[[depVar]] <- runif(nSamples, limits[1], limits[2])
+} else if (distribution == "Gaussian") {
+  centre <- mean(limits)
+  spread <- diff(limits) / 4
+  sampled <- rnorm(nSamples, mean=centre, sd=spread)
+  df.LUT[[depVar]] <- pmin(pmax(sampled, limits[1]), limits[2])
+} else {
+  stop("Choose either Uniform or Gaussian for distribution.")
+}
+df.LUT[[depVar]] <- round(df.LUT[[depVar]], 3)
+# Show the model inputs: each displayed row will be one forward simulation.
+DT::datatable(round(df.LUT, 3),
+              options=list(pageLength=5, scrollX=TRUE), rownames=FALSE,
+              caption=paste("Input LUT:", depVar, "sampled from", distribution))
+```
+
+For example, compare `depVar <- "Cab"` with `depVar <- "LAI"`. Keep `distribution <- "Uniform"` to spread samples across the range; choose `"Gaussian"` to draw most values near the middle. The histogram shows the values actually sampled. In the spectrum plot, each line is one simulated canopy. `psoil` changes the dry/wet soil mixture.
+
+```{r trait-distribution}
+# Plot the values sampled for the selected trait to check the LUT distribution.
+stopifnot(depVar %in% names(df.LUT))
+plotly::plot_ly(x=df.LUT[[depVar]], type="histogram",
+                marker=list(color="#2876a8", line=list(color="white", width=1)),
+                nbinsx=10,
+                hovertemplate=paste(depVar, "= %{x}<br>Rows: %{y}<extra></extra>")) |>
+  plotly::layout(title=paste("Distribution of", depVar, "in the LUT"),
+                 xaxis=list(title=depVar), yaxis=list(title="Number of rows")) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+```{block, type="question"}
+> **Question 1.** Look at the LUT table. Which trait changes from row to row, what range does it cover, and which inputs stay fixed? Compare the table and histogram for `distribution <- "Uniform"` and `distribution <- "Gaussian"`. Where do the sampled values cluster in each case, and why might you choose one distribution over the other?
+```
+
+## 3. See the soil background (4 minutes)
+
+Before running the canopy model, compare the soil spectra it can use. This helps you see what `psoil` controls in the LUT: the mix between the package's dry and wet soil examples.
+
+`dataSpec_PDB` contains two example soil spectra. `psoil = 1` uses the dry spectrum; `psoil = 0` uses the wet spectrum. This is a mixing weight, not a measured water content. The measured soil file in `data/` is shown for comparison and is not used in the simulation.
+
+```{r soil}
+# Load the wavelengths and example dry and wet soil spectra from ToolsRTM.
+data_light <- ToolsRTM::dataSpec_PDB
+wl <- data_light$wavelength
+# Mix the two package spectra using the dry-soil fraction chosen in the LUT chunk.
+psoil <- psoil_value
+rsoil <- psoil * data_light$dry_soil +
+         (1 - psoil) * data_light$wet_soil
+# Read a measured soil spectrum for visual comparison only.
+data_dir <- if (dir.exists("data")) "data" else "../data"
+field_soil <- read.csv(file.path(data_dir, "soil_spectrum_bablet_ID1.csv"))
+
+# Assemble the four curves in one table so Plotly can draw them together.
+soil_plot <- data.frame(
+  wavelength=c(wl, wl, wl, field_soil$Wavelength),
+  reflectance=c(data_light$dry_soil, data_light$wet_soil, rsoil,
+                field_soil$Reflectance),
+  spectrum=factor(rep(c("Package dry", "Package wet",
+                        paste0(round(100*psoil), "% dry model mix"),
+                        "Measured soil example"),
+                      times=c(length(wl), length(wl), length(wl),
+                              nrow(field_soil))))
+)
+plotly::plot_ly(soil_plot, x=~wavelength, y=~reflectance,
+                color=~spectrum, colors=c("#b5651d", "#2876a8", "#222222", "#6b8e23"),
+                type="scatter", mode="lines",
+                hovertemplate="%{fullData.name}<br>%{x} nm<br>Reflectance: %{y:.3f}<extra></extra>") |>
+  plotly::layout(xaxis=list(title="Wavelength (nm)"),
+                 yaxis=list(title="Soil reflectance"),
+                 legend=list(title=list(text="Soil spectrum"))) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+The measured soil spectrum ends at 2400 nm, so we only compare it visually here. The model uses the complete package spectrum from 400 to 2500 nm.
+
+In the `lut` chunk, try `psoil_value <- 0`, `psoil_value <- 0.5` and `psoil_value <- 1`. Each time, rerun the `lut` chunk and then the `soil` chunk. Compare the model mixture with the measured soil curve. A lower value gives more weight to the wet-soil spectrum; a higher value gives more weight to the dry-soil spectrum. The selected value is stored in the LUT and is used by the canopy simulation when `psoil` is not the trait being varied. Treat this only as a spectral mixing parameter, not as a direct estimate of soil water content. To see its effect on the canopy, also rerun `trait-distribution` and `simulate-lut`.
+
+```{block, type="question"}
+> **Question 2.** Which `psoil` value gives a soil spectrum that looks closest to the measured example? Does the measured spectrum look more like the package's wet or dry soil? What does your comparison suggest about the soil background, and what can it not tell you about the actual water content?
+```
+
+## 4. Simulate the LUT (8 minutes)
+
+Now run the forward model for every row in the LUT and compare the resulting canopy spectra. Each curve corresponds to one set of inputs; its colour indicates the trait you chose to vary.
+
+The loop runs the forward model once for each LUT row. `foursail()` combines the PROSPECT-D leaf with the canopy and the row's soil mixture. It returns directional reflectance terms (`rdot` and `rsot`). `Compute_BRF()` combines those terms with the sun angle (`tts`) to calculate the canopy's **bidirectional reflectance factor (BRF)** at each wavelength. BRF is the simulated spectrum for one sun and viewing geometry; BRDF is the broader reflectance distribution as illumination and viewing directions change. This loop calculates BRF spectra, not a full BRDF.
+
+To try another trait, change `depVar` in Section 2 (for example, from `"Cab"` to `"LAI"`). The LUT then varies that trait, and this same loop simulates every resulting row. Keep the other inputs fixed to see the spectral effect of the selected trait.
+
+```{r simulate-lut}
+# Reserve one output row per LUT row and one column per wavelength.
+spectra <- matrix(NA_real_, nrow=nSamples, ncol=length(wl))
+for (i in 1:nSamples) {
+  # Take the current LUT row: this row defines one canopy simulation.
+  row <- df.LUT[i, , drop=FALSE]
+  # Mix dry and wet soil according to this row's psoil value.
+  soil_i <- row$psoil * data_light$dry_soil +
+            (1 - row$psoil) * data_light$wet_soil
+  # Run PROSPECT-D for the leaf and fourSAIL for canopy reflectance terms.
+  sail <- ToolsRTM::foursail(inputLUT=row, rsoil=soil_i,
+                            LeafModel="PROSPECT-D")
+  # Convert the canopy terms to a BRF spectrum for this sun-view geometry.
+  spectra[i, ] <- as.numeric(ToolsRTM::Compute_BRF(
+    rdot=sail$rdot, rsot=sail$rsot,
+    tts=row$tts, data.light=data_light))
+}
+# Reshape spectra for Plotly and keep the chosen trait for line colours.
+spectra_long <- data.frame(
+  wavelength=rep(wl, times=nrow(spectra)),
+  reflectance=as.vector(t(spectra)),
+  trait_value=rep(df.LUT[[depVar]], each=length(wl))
+)
+plotly::plot_ly(spectra_long, x=~wavelength, y=~reflectance,
+                color=~trait_value,
+                colors=colorRamp(c("#2166AC", "#F7F7F7", "#B2182B")),
+                split=~factor(trait_value),
+                type="scatter", mode="lines",
+                line=list(width=1), opacity=0.45,
+                hovertemplate=paste(depVar, ": %{legendgroup}<br>%{x} nm<br>Reflectance: %{y:.3f}<extra></extra>")) |>
+  plotly::layout(title=paste("Simulated spectra across the", depVar, "range"),
+                 xaxis=list(title="Wavelength (nm)"),
+                 yaxis=list(title="Canopy reflectance"),
+                 showlegend=FALSE,
+                 coloraxis=list(colorbar=list(title=depVar))) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+### Your turn: compare Cab and LAI
+
+Keep `distribution <- "Uniform"` and `nSamples <- 100`. First set `depVar <- "Cab"`, then rerun the LUT, histogram and simulation chunks. You should see 100 LUT rows and 100 spectra, with Cab spanning 10–80. Next change `depVar <- "LAI"` and rerun those chunks. The code keeps Cab fixed at 40 while LAI spans 0.5–6; the other inputs stay fixed in both runs.
+
+Compare the two spectrum plots. Which wavelength regions respond most to Cab, and which respond most to LAI? How does the spread of spectra differ? As a follow-up, choose another trait in `depVar` (such as `EWT` or `psoil`) and describe the change. The histogram shows the sampled values; the spectrum plot shows their simulated effect.
+
+```{block, type="question"}
+> **Question 3.** Imagine that your measured canopy spectrum does not match the simulation. Compare one input at a time. Set `depVar <- "Cab"`, then rerun the `lut`, `trait-distribution` and `simulate-lut` chunks. Next set `depVar <- "LAI"` and rerun those same three chunks. You do not need to rerun the soil chunk. Which change brings the simulated spectrum closer to the measured one, and at which wavelengths? Why might it be harder to interpret the result if you change Cab and LAI together?
+```
+
+Continue to [Exercise 2: trait sensitivity and LUTs](02-Trait-Sensitivity_practical.html).

@@ -1,0 +1,52 @@
+<style>
+pre.r { position: relative; padding-top: 2.5em !important; }
+.copy-code-button {
+  position: absolute; top: .45em; right: .55em; z-index: 2;
+  border: 0; border-radius: 4px; padding: .35em .7em;
+  background: #1a5276; color: #fff; font: 12px sans-serif;
+  cursor: pointer;
+}
+.copy-code-button:hover { background: #2876a8; }
+.copy-code-button:focus { outline: 2px solid #f0c24b; outline-offset: 2px; }
+</style>
+<script>
+(function () {
+  function addCopyButtons() {
+    document.querySelectorAll("pre.r").forEach(function (block) {
+      if (block.querySelector(".copy-code-button")) return;
+      var button = document.createElement("button");
+      button.type = "button";
+      button.className = "copy-code-button";
+      button.textContent = "Copy";
+      button.setAttribute("aria-label", "Copy R code");
+      button.addEventListener("click", async function () {
+        var code = block.querySelector("code");
+        var text = code ? code.innerText : block.innerText;
+        var copied = false;
+        try {
+          await navigator.clipboard.writeText(text);
+          copied = true;
+        } catch (error) {
+          var area = document.createElement("textarea");
+          area.value = text;
+          area.setAttribute("readonly", "");
+          area.style.position = "fixed";
+          area.style.opacity = "0";
+          document.body.appendChild(area);
+          area.select();
+          copied = document.execCommand("copy");
+          area.remove();
+        }
+        button.textContent = copied ? "Copied" : "Copy failed";
+        window.setTimeout(function () { button.textContent = "Copy"; }, 1400);
+      });
+      block.appendChild(button);
+    });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", addCopyButtons);
+  } else {
+    addCopyButtons();
+  }
+})();
+</script>

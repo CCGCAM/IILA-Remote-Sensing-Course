@@ -1,0 +1,536 @@
+---
+title: "Exercise 3: Field spectra and vegetation trait inversion"
+subtitle: "IILA | 30 minutes | Achterhoek field data"
+author: "Carlos Camino González"
+output:
+  html_document:
+    toc: true
+    theme: cosmo
+    self_contained: true
+---
+
+**RTM-Suite:** [website](https://rtm-suite.wur.nl/) · [ToolsRTM documentation](https://rtm-suite.wur.nl/toolsrtm/)
+
+```{r copy-code-buttons, echo=FALSE, results='asis'}
+copy_file <- c("copy-code.html", "../copy-code.html", "../../copy-code.html")
+copy_file <- copy_file[file.exists(copy_file)][1]
+if (is.na(copy_file)) stop("Could not find copy-code.html from the current working directory.")
+cat(readLines(copy_file, warn=FALSE), sep="\n")
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=TRUE, message=FALSE, warning=FALSE,
+                      fig.width=8, fig.height=4)
+```
+
+```{=html}
+<style>.question{background-color:#e4ecf2;border-left:5px solid #1a5276;color:#14374f;padding:.75em 1em;margin:1em 0;border-radius:4px}</style>
+```
+
+**Goal:** Explore nitrogen-related indices in 40 FieldSpec plots, build and simulate a 500-row PROSAIL LUT, compare classical cost functions, and train ToolsRTM Random Forest inversions for Cab, LAI and EWT. Apply the simulated models to the field spectra and compare retrieved traits with measured nitrogen and biomass.
+
+## 1. Meet the field dataset (2 minutes)
+
+The data come from 40 randomly located 3 × 3 m plots in a grazed fen meadow in the Achterhoek, Netherlands. An ASD FieldSpec 3 measured each plot from 350 to 2500 nm at 1 nm spacing. Each spectrum averages 50 scans. Destructive sampling provided fresh and dry biomass, nitrogen concentration, and nitrogen content per ground area. The two CSV files are included in this course folder.
+
+First inspect the field measurements and the spectral profiles. The grey bands mark regions where atmospheric water absorption often makes field spectra noisy; we will omit those wavelengths during spectral matching.
+
+```{r field-data}
+# Find the course data folder whether this document is opened from the project or Exercises folder.
+data_dir <- if (dir.exists("data")) "data" else "../data"
+spectra_wide <- read.csv(file.path(data_dir, "Achterhoek_FieldSpec_2008.csv"),
+                         check.names=FALSE)
+field <- read.csv(file.path(data_dir, "Achterhoek_FieldSpec_2008_field_sampling.csv"),
+                  check.names=FALSE)
+wavelength_field <- as.numeric(spectra_wide[[1]])
+plot_ids <- names(spectra_wide)[-1]
+reflectance_field <- t(as.matrix(spectra_wide[, -1, drop=FALSE]))
+storage.mode(reflectance_field) <- "double"
+rownames(reflectance_field) <- plot_ids
+field$Plot <- as.character(field$Plot)
+
+cat("Plots:", ncol(spectra_wide) - 1,
+    "| wavelengths:", min(wavelength_field), "to", max(wavelength_field), "nm\n")
+knitr::kable(head(field, 5), digits=2, row.names=FALSE,
+             caption="Example plot measurements")
+```
+
+```{r field-profiles}
+# Put the 40 measured profiles into long format for an interactive plot.
+profile_data <- data.frame(
+  wavelength=rep(wavelength_field, times=nrow(reflectance_field)),
+  reflectance=as.vector(t(reflectance_field)),
+  Plot=factor(rep(plot_ids, each=length(wavelength_field)))
+)
+plotly::plot_ly(profile_data, x=~wavelength, y=~reflectance, color=~Plot,
+                type="scatter", mode="lines", opacity=0.65,
+                hovertemplate="Plot %{legendgroup}<br>%{x} nm<br>Reflectance: %{y:.3f}<extra></extra>") |>
+  plotly::layout(title="Achterhoek FieldSpec profiles: 40 plots",
+                 xaxis=list(title="Wavelength (nm)"),
+                 yaxis=list(title="Reflectance", range=c(0, 0.8)),
+                 shapes=list(
+                   list(type="rect", x0=1350, x1=1450, y0=0, y1=1,
+                        fillcolor="#b9c3cc", opacity=0.25, line=list(width=0)),
+                   list(type="rect", x0=1800, x1=2000, y0=0, y1=1,
+                        fillcolor="#b9c3cc", opacity=0.25, line=list(width=0)),
+                   list(type="rect", x0=2400, x1=2500, y0=0, y1=1,
+                        fillcolor="#b9c3cc", opacity=0.25, line=list(width=0)))) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+The reflectance profiles differ between plots, especially around the red edge and in the NIR. Some water-absorption regions are noisy. Next we use ToolsRTM indices to ask whether these spectral differences track measured nitrogen and biomass.
+
+```{block, type="question"}
+> **Question 1.** Which plots have the highest and lowest N content? In the spectral plot, where do their profiles differ most? Which grey wavelength regions look least reliable for comparing plots?
+```
+
+## 2. Calculate indices and explore their relationship with N (4 minutes)
+
+`get.indices.v2()` interpolates each measured spectrum to 1 nm and calculates a large set of vegetation indices. We keep a short set covering greenness, the red edge and a nitrogen-sensitive SWIR feature. We then join the indices to the field measurements by plot ID and compare Pearson correlations. A correlation is an association in these 40 plots; it does not show that an index causes a change in nitrogen.
+
+```{r calculate-indices, results='hide'}
+# Give each spectrum wavelength-based column names required by get.indices.v2().
+reflectance_table <- as.data.frame(reflectance_field)
+names(reflectance_table) <- paste0("R.", wavelength_field)
+# get.indices.v2 calculates VNIR and SWIR families separately; run both domains.
+invisible(capture.output(
+  indices_vnir <- as.data.frame(ToolsRTM::get.indices.v2(
+    data=reflectance_table, pattern.rfl="R.", spectral.domain="VNIR"))
+))
+invisible(capture.output(
+  indices_swir <- as.data.frame(ToolsRTM::get.indices.v2(
+    data=reflectance_table, pattern.rfl="R.", spectral.domain="SWIR"))
+))
+indices <- cbind(indices_vnir,
+                 indices_swir[, setdiff(names(indices_swir), names(indices_vnir)),
+                              drop=FALSE])
+indices$Plot <- as.character(plot_ids)
+
+# Join the computed indices to the measured biomass and nitrogen values.
+field_indices <- merge(field, indices, by="Plot", sort=FALSE)
+field_indices <- field_indices[match(plot_ids, field_indices$Plot), ]
+field_indices$N_content <- field_indices[["N content (g/m2)"]]
+field_indices$N_concentration <- field_indices[["N concentration (g/kg)"]]
+field_indices$Fresh_weight <- field_indices[["Fresh weight (ton/ha)"]]
+field_indices$Dry_weight <- field_indices[["Dry weight (ton/ha)"]]
+field_indices$Plant_water <- field_indices$Fresh_weight - field_indices$Dry_weight
+
+index_candidates <- c("NDVI", "CIre", "REP", "NDNI", "OSAVI")
+index_names <- intersect(index_candidates, names(field_indices))
+target_names <- c("N_content", "N_concentration", "Dry_weight", "Fresh_weight", "Plant_water")
+correlation_matrix <- matrix(NA_real_, nrow=length(target_names),
+                             ncol=length(index_names),
+                             dimnames=list(target_names, index_names))
+for (target in target_names) {
+  for (index in index_names) {
+    correlation_matrix[target, index] <- cor(
+      field_indices[[target]], field_indices[[index]],
+      use="complete.obs", method="pearson")
+  }
+}
+```
+
+```{r index-correlations}
+# Inspect a few joined plot records before interpreting the heatmap.
+knitr::kable(head(field_indices[c("Plot", "N_content", "N_concentration",
+                                  "Dry_weight", index_names)], 6),
+             digits=3, row.names=FALSE,
+             caption="Measured traits joined to selected ToolsRTM indices")
+# Compare the sign and strength of the index relationships across field traits.
+plotly::plot_ly(x=colnames(correlation_matrix), y=rownames(correlation_matrix),
+                z=correlation_matrix, type="heatmap",
+                colorscale="RdBu", reversescale=TRUE, zmin=-1, zmax=1,
+                hovertemplate="%{y} vs %{x}<br>Pearson r = %{z:.2f}<extra></extra>") |>
+  plotly::layout(title="Field traits and spectral-index correlations",
+                 xaxis=list(title="Index"), yaxis=list(title="Field measurement")) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+
+# Highlight the index most correlated with measured N content in this dataset.
+selected_index <- index_names[which.max(abs(correlation_matrix["N_content", ]))]
+index_fit <- lm(field_indices$N_content ~ field_indices[[selected_index]])
+index_order <- order(field_indices[[selected_index]])
+plotly::plot_ly(field_indices, x=field_indices[[selected_index]],
+                y=~N_content, type="scatter", mode="markers",
+                text=~Plot, marker=list(color="#2876a8", size=9),
+                hovertemplate="Plot %{text}<br>Index: %{x:.3f}<br>N content: %{y:.2f} g/m2<extra></extra>") |>
+  plotly::add_lines(x=field_indices[[selected_index]][index_order],
+                    y=fitted(index_fit)[index_order], name="Linear trend",
+                    inherit=FALSE, line=list(color="#d55e00", width=2)) |>
+  plotly::layout(title=paste("N content versus", selected_index),
+                 xaxis=list(title=selected_index),
+                 yaxis=list(title="N content (g/m2)")) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+`N concentration` is nitrogen per unit dry matter; `N content` is nitrogen per ground area. They describe different things, so an index may relate differently to each. The strongest correlation is a useful candidate predictor, not proof that it will work in another site or year.
+
+```{block, type="question"}
+> **Question 2.** Which index has the strongest relationship with N content? Does the same index relate equally well to N concentration and dry biomass? What spectral feature does your selected index use, and what might limit this relationship in another meadow?
+```
+
+## 3. Choose model inputs and build a random LUT (4 minutes)
+
+Now create a new LUT with ToolsRTM. The ranges below are starting ranges for green grassland canopies, not values measured for each plot. Choose a leaf model and canopy model, then draw 500 combinations. Each line below shows exactly which parameter changes and how it is sampled. The default is Uniform; switch Cab to a bounded Gaussian sample to compare distributions. `psoil` is the dry/wet soil mixing weight.
+
+```{r choose-models}
+leaf_model <- "PROSPECT-D"  # or "PROSPECT-PRO"
+canopy_model <- "fourSAIL"  # or "foursail2"
+stopifnot(leaf_model %in% c("PROSPECT-D", "PROSPECT-PRO"),
+          canopy_model %in% c("fourSAIL", "foursail2"))
+```
+
+```{r lut-ranges}
+n_samples <- 500
+# Ask ToolsRTM for a complete, correctly named PROSAIL input table.
+lut_inputs <- ToolsRTM::inputsPROSAIL
+lut_inputs$use.default <- 1
+input_lut <- as.data.frame(ToolsRTM::getLUT(
+  inputs=lut_inputs, nLUT=n_samples, setseed=42))
+
+# Draw random leaf traits. Change Cab sampling to "Gaussian" to compare shapes.
+set.seed(43)
+cab_sampling <- "Uniform"  # or "Gaussian"
+input_lut$N <- runif(n_samples, 1.4, 1.6)
+if (cab_sampling == "Uniform") {
+  input_lut$Cab <- runif(n_samples, 10, 80)
+} else {
+  input_lut$Cab <- pmin(80, pmax(10, rnorm(n_samples, 45, 12)))
+}
+input_lut$Car <- runif(n_samples, 7, 15)
+input_lut$Anth <- runif(n_samples, 0, 5)
+input_lut$Cbrown <- runif(n_samples, 0, 0.1)
+input_lut$EWT <- runif(n_samples, 0.01, 0.035)
+
+# PROSPECT-D uses LMA; PROSPECT-PRO separates protein and carbon constituents.
+if (leaf_model == "PROSPECT-D") {
+  input_lut$LMA <- runif(n_samples, 0.004, 0.02)
+  input_lut$Prot <- 0
+  input_lut$CBC <- 0
+  traits_to_vary <- c("N", "Cab", "Car", "Anth", "Cbrown", "EWT", "LMA")
+} else {
+  input_lut$Prot <- runif(n_samples, 0.004, 0.012)
+  input_lut$CBC <- runif(n_samples, 0.003, 0.013)
+  input_lut$LMA <- input_lut$Prot + input_lut$CBC
+  traits_to_vary <- c("N", "Cab", "Car", "Anth", "Cbrown", "EWT", "Prot", "CBC")
+}
+
+# Draw canopy traits; hold illumination and view angles fixed for this LUT.
+input_lut$LAI <- runif(n_samples, 0.5, 6)
+input_lut$LIDFa <- runif(n_samples, -0.5, 0.5)
+input_lut$hspot <- runif(n_samples, 0.01, 0.5)
+input_lut$psoil <- runif(n_samples, 0.2, 0.8)
+input_lut$TypeLidf <- 1
+input_lut$LIDFb <- -0.15
+input_lut$tts <- 30
+input_lut$tto <- 0
+input_lut$psi <- 0
+traits_to_vary <- c(traits_to_vary, "LAI", "LIDFa", "hspot", "psoil")
+
+# Check the actual random ranges in the generated rows.
+range_table <- data.frame(
+  Trait=traits_to_vary,
+  Distribution=ifelse(traits_to_vary == "Cab", cab_sampling, "Uniform"),
+  Sample_min=vapply(input_lut[traits_to_vary], min, numeric(1)),
+  Sample_max=vapply(input_lut[traits_to_vary], max, numeric(1))
+)
+DT::datatable(range_table, options=list(pageLength=12, scrollX=TRUE),
+              rownames=FALSE, caption="Ranges represented by the 500 LUT rows")
+```
+
+The ranges are deliberately editable. If the measured profiles sit outside the simulated range, adjust the relevant input bounds and regenerate the LUT. The mean and SD plot in the next section shows the ensemble spread; it does not say which single trait caused it.
+
+```{block, type="question"}
+> **Question 3.** Which traits vary in your LUT, and which geometry settings stay fixed? What ranges did you set in the code? Why do we set a seed, and which range would you adjust first if the simulated spectra do not cover the measured profiles?
+```
+
+## 4. Simulate the LUT and inspect its variability (5 minutes)
+
+The loop runs one forward simulation for each LUT row. The blue line is the mean spectrum and the shaded band is mean ± one standard deviation. Grey lines show a random sample of individual canopies. The shaded band describes the spread of the 500 simulations; it is not a confidence interval for the field measurements.
+
+```{r simulate-random-lut}
+# Load the model wavelength grid and its example dry/wet soil spectra.
+data_light <- ToolsRTM::dataSpec_PDB
+wl <- data_light$wavelength
+spectra <- matrix(NA_real_, nrow=nrow(input_lut), ncol=length(wl))
+
+for (i in seq_len(nrow(input_lut))) {
+  # Mix soil for this LUT row, then simulate its leaf and canopy reflectance.
+  row <- input_lut[i, , drop=FALSE]
+  soil_i <- row$psoil * data_light$dry_soil +
+            (1 - row$psoil) * data_light$wet_soil
+  canopy <- ToolsRTM::simulate_RTM(
+    inputLUT=row, rsoil=soil_i,
+    leaf.model=leaf_model, canopy.model=canopy_model)
+  spectra[i, ] <- as.numeric(ToolsRTM::Compute_BRF(
+    rdot=canopy$rdot, rsot=canopy$rsot,
+    tts=row$tts, data.light=data_light))
+}
+
+# Summarize the random LUT with its mean and standard deviation at each wavelength.
+mean_rfl <- colMeans(spectra)
+sd_rfl <- apply(spectra, 2, sd)
+set.seed(44)
+sample_rows <- sample(seq_len(nrow(spectra)), min(30, nrow(spectra)))
+
+variability <- data.frame(wavelength=wl,
+                          lower=pmax(0, mean_rfl - sd_rfl),
+                          upper=mean_rfl + sd_rfl,
+                          mean=mean_rfl)
+variability_plot <- plotly::plot_ly() |>
+  plotly::add_ribbons(data=variability, x=~wavelength, ymin=~lower, ymax=~upper,
+                      name="Mean ± 1 SD",
+                      fillcolor="rgba(139,182,217,0.38)",
+                      line=list(color="rgba(0,0,0,0)"),
+                      hovertemplate="%{x} nm<br>Mean ± 1 SD<extra></extra>")
+for (i in sample_rows) {
+  variability_plot <- plotly::add_lines(
+    variability_plot, x=wl, y=spectra[i, ],
+    name=paste("LUT row", i), showlegend=FALSE,
+    hoverinfo="skip", line=list(color="rgba(70,70,70,0.22)", width=1))
+}
+variability_plot |>
+  plotly::add_lines(data=variability, x=~wavelength, y=~mean,
+                    name="Mean spectrum", line=list(color="#174c77", width=2)) |>
+  plotly::layout(title="Random LUT: canopy spectral variability",
+                 xaxis=list(title="Wavelength (nm)"),
+                 yaxis=list(title="Canopy reflectance"),
+                 legend=list(title=list(text="500 simulations"))) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+Compare this ensemble with the earlier one-trait-at-a-time plots in Exercise 2. There, only one input changed, so its spectral effect was easier to isolate. Here many inputs change together, so the envelope shows combined variation. The next heatmap uses the same random LUT to screen which inputs are associated with reflectance changes in selected spectral regions.
+
+```{r lut-sensitivity}
+# Screen trait-reflectance relationships at visible, red-edge, NIR and SWIR wavelengths.
+predictors <- c(traits_to_vary, "psoil")
+target_wavelengths <- c(670, 705, 740, 800, 1510, 1680)
+target_columns <- match(target_wavelengths, wl)
+lut_correlations <- matrix(NA_real_, nrow=length(predictors),
+                           ncol=length(target_wavelengths),
+                           dimnames=list(predictors, paste0(target_wavelengths, " nm")))
+for (trait in predictors) {
+  for (j in seq_along(target_wavelengths)) {
+    lut_correlations[trait, j] <- cor(input_lut[[trait]], spectra[, target_columns[j]],
+                                      use="complete.obs", method="pearson")
+  }
+}
+plotly::plot_ly(x=colnames(lut_correlations), y=rownames(lut_correlations),
+                z=lut_correlations, type="heatmap",
+                colorscale="RdBu", reversescale=TRUE, zmin=-1, zmax=1,
+                hovertemplate="%{y} vs %{x}<br>Pearson r = %{z:.2f}<extra></extra>") |>
+  plotly::layout(title="Trait association with reflectance in selected regions",
+                 xaxis=list(title="Wavelength"), yaxis=list(title="LUT input")) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+These correlations are a quick screen based on this LUT and its ranges. A large value can reflect a broad input range, and interactions or nonlinear effects may not be captured. The sensitivity analysis in Exercise 2 is a more systematic way to compare contributions.
+
+```{block, type="question"}
+> **Question 4.** Which traits are most associated with reflectance in the red edge, NIR and SWIR? How does the mean ± SD envelope differ from the single-trait sweeps? If the observed spectra fall outside the envelope, which LUT ranges would you inspect?
+```
+
+## 5. Classical inversion: compare cost functions (5 minutes)
+
+Classical inversion searches the LUT for simulated spectra closest to a measured spectrum. We compare three cost functions using all 40 field plots and average the traits from the five best LUT matches (`nOpt=5`). RMSE penalizes large differences more; MAE averages absolute differences; the first-derivative metric compares spectral shape and can emphasize the red edge, but also amplifies noise. The masked wavelength vector avoids major atmospheric water-absorption regions.
+
+```{r classical-inversion}
+# Match the 400-2500 nm model grid to the field data and remove noisy regions.
+field_at_model_wl <- reflectance_field[, match(wl, wavelength_field), drop=FALSE]
+use_wavelength <- (wl >= 400 & wl <= 1350) |
+                  (wl >= 1450 & wl <= 1800) |
+                  (wl >= 2000 & wl <= 2400)
+field_for_inversion <- field_at_model_wl[, use_wavelength, drop=FALSE]
+lut_for_inversion <- spectra[, use_wavelength, drop=FALSE]
+wave_for_inversion <- wl[use_wavelength]
+
+# Compare raw-reflectance errors with a shape-focused first-derivative error.
+cost_methods <- c("merit-RMSE", "merit-MAE", "merit-1stD")
+classical_results <- list()
+for (method in cost_methods) {
+  # get.inversionOpt prints a text progress bar for each field plot.
+  # Capture console output so the rendered handout stays clean.
+  invisible(capture.output(suppressMessages(
+    classical_results[[method]] <- ToolsRTM::get.inversionOpt(
+      rfl.sensor=field_for_inversion, rfl.rtm=lut_for_inversion,
+      LUT=input_lut, wave=wave_for_inversion, method=method, nOpt=5)
+  )))
+}
+
+# Keep the five-best-match mean estimates for each plot and cost function.
+estimate_tables <- list()
+for (method in cost_methods) {
+  best_traits <- classical_results[[method]][[2]]
+  estimate_tables[[method]] <- data.frame(
+    Plot=plot_ids, N_content=field_indices$N_content,
+    Dry_weight=field_indices$Dry_weight,
+    Fresh_weight=field_indices$Fresh_weight,
+    Method=method, Cab=best_traits$Cab,
+    EWT=best_traits$EWT, LAI=best_traits$LAI)
+}
+classical_estimates <- do.call(rbind, estimate_tables)
+rmse_estimates <- estimate_tables[["merit-RMSE"]]
+field_indices$Cab_RMSE <- rmse_estimates$Cab[match(field_indices$Plot, rmse_estimates$Plot)]
+field_indices$EWT_RMSE <- rmse_estimates$EWT[match(field_indices$Plot, rmse_estimates$Plot)]
+best_index_n <- index_names[which.max(abs(correlation_matrix["N_content", ]))]
+best_index_water <- index_names[which.max(abs(correlation_matrix["Plant_water", ]))]
+knitr::kable(head(classical_estimates, 12), digits=3, row.names=FALSE,
+             caption="Example retrieved traits: mean of five best LUT matches")
+```
+
+```{block, type="question"}
+> **Question 5.** Do the three cost functions return similar estimates? How could noisy water-absorption regions affect RMSE or the derivative comparison if we had not masked them? Which method would you carry forward to compare with the Random Forest estimates?
+```
+
+## 6. Retrieve Cab, LAI and EWT with Random Forest (10 minutes)
+
+The LUT contains 500 simulated canopies with known Cab, LAI and EWT values. We train `get.inversion()` on these simulated examples, using FieldSpec-like reflectance bands sampled every 10 nm and indices related to measured N content and plant water mass. The three models then estimate Cab, LAI and EWT for the measured plots. This is a simulated-to-field transfer, so first check whether the measured reflectances fall within the LUT ranges. The dataset has no measured Cab, LAI or EWT values for a direct accuracy check.
+
+```{r prepare-rf-features, results='hide'}
+# Use a 10 nm grid in reliable wavelength regions; omit strong water absorption.
+sample_wavelengths <- seq(400, 2400, by=10)
+use_10nm <- (sample_wavelengths >= 400 & sample_wavelengths <= 1350) |
+            (sample_wavelengths >= 1450 & sample_wavelengths <= 1800) |
+            (sample_wavelengths >= 2000 & sample_wavelengths <= 2400)
+sample_wavelengths <- sample_wavelengths[use_10nm]
+model_columns <- match(sample_wavelengths, wl)
+band_names <- paste0("R_", sample_wavelengths)
+
+# Create matching 10 nm reflectance predictors from all 500 LUT spectra.
+lut_bands <- as.data.frame(spectra[, model_columns, drop=FALSE])
+names(lut_bands) <- band_names
+
+# Interpolate each measured FieldSpec profile to exactly the same wavelengths.
+field_bands <- t(vapply(seq_len(nrow(reflectance_field)), function(i) {
+  approx(x=wavelength_field, y=reflectance_field[i, ],
+         xout=sample_wavelengths, rule=1)$y
+}, numeric(length(sample_wavelengths))))
+field_bands <- as.data.frame(field_bands)
+names(field_bands) <- band_names
+
+# Calculate the same selected ToolsRTM indices for simulated and measured spectra.
+simulated_rfl <- as.data.frame(spectra)
+names(simulated_rfl) <- paste0("R.", wl)
+indices_sim_vnir <- as.data.frame(ToolsRTM::get.indices.v2(
+  data=simulated_rfl, pattern.rfl="R.", spectral.domain="VNIR"))
+indices_sim_swir <- as.data.frame(ToolsRTM::get.indices.v2(
+  data=simulated_rfl, pattern.rfl="R.", spectral.domain="SWIR"))
+indices_sim <- cbind(indices_sim_vnir,
+                     indices_sim_swir[, setdiff(names(indices_sim_swir), names(indices_sim_vnir)),
+                                      drop=FALSE])
+best_index_n <- index_names[which.max(abs(correlation_matrix["N_content", ]))]
+best_index_water <- index_names[which.max(abs(correlation_matrix["Plant_water", ]))]
+index_predictors <- unique(c(best_index_n, best_index_water))
+stopifnot(all(index_predictors %in% names(indices_sim)),
+          all(index_predictors %in% names(field_indices)))
+
+lut_features <- cbind(lut_bands, indices_sim[, index_predictors, drop=FALSE])
+field_features <- cbind(field_bands,
+                         field_indices[, index_predictors, drop=FALSE])
+feature_names <- names(lut_features)
+``` 
+
+Before transferring the models to the field spectra, check whether each measured input falls inside the range seen by the LUT. Counts above zero mean that some predictors are outside the training data and the RF may be extrapolating.
+
+```{r lut-domain-check}
+outside <- vapply(feature_names, function(name) {
+  observed <- field_features[[name]]
+  simulated_range <- range(lut_features[[name]], na.rm=TRUE)
+  !is.finite(observed) | observed < simulated_range[1] |
+    observed > simulated_range[2]
+}, logical(nrow(field_features)))
+outside_count <- rowSums(outside)
+domain_check <- data.frame(
+  Plot=plot_ids,
+  Predictors_outside_LUT=outside_count,
+  Total_predictors=length(feature_names)
+)
+DT::datatable(domain_check, options=list(pageLength=8), rownames=FALSE,
+              caption="Field predictors outside the simulated LUT range")
+```
+
+```{r train-rf-inversion}
+# Train one ToolsRTM RF inversion for each trait using the 500 simulated rows.
+fit_lut_rf <- function(target) {
+  training_data <- data.frame(target=input_lut[[target]], lut_features,
+                              check.names=FALSE)
+  names(training_data)[1] <- target
+  invisible(capture.output(suppressMessages(
+    fit <- ToolsRTM::get.inversion(
+      data=training_data, depVar=target, inputs=feature_names,
+      algorithm="RF", method.resampling="cv", n.cores=1,
+      seed=42, n.samples=nrow(training_data))
+  )))
+  fit
+}
+rf_cab <- fit_lut_rf("Cab")
+rf_lai <- fit_lut_rf("LAI")
+rf_ewt <- fit_lut_rf("EWT")
+
+rf_lut_summary <- rbind(
+  data.frame(Trait="Cab", rf_cab$statistics),
+  data.frame(Trait="LAI", rf_lai$statistics),
+  data.frame(Trait="EWT", rf_ewt$statistics)
+)
+knitr::kable(rf_lut_summary, digits=3, row.names=FALSE,
+             caption="Cross-validation on the simulated 500-row LUT")
+```
+
+Apply the three trained models to the 40 FieldSpec profiles. The panels compare measured N content with retrieved Cab, measured dry biomass with retrieved LAI, and measured plant water mass with a canopy water estimate. Each title and axis names both variables. The classical LUT cost functions and RF inversion are shown separately. These are exploratory relationships, not direct validation of the retrieved traits.
+
+```{r apply-rf-and-compare}
+field_indices$Cab_RF <- as.numeric(predict(rf_cab$model, newdata=field_features))
+field_indices$LAI_RF <- as.numeric(predict(rf_lai$model, newdata=field_features))
+field_indices$EWT_RF <- as.numeric(predict(rf_ewt$model, newdata=field_features))
+rf_estimates <- data.frame(
+  Plot=plot_ids, N_content=field_indices$N_content,
+  Dry_weight=field_indices$Dry_weight, Fresh_weight=field_indices$Fresh_weight,
+  Method="RF-LUT", Cab=field_indices$Cab_RF,
+  EWT=field_indices$EWT_RF, LAI=field_indices$LAI_RF)
+all_estimates <- rbind(classical_estimates, rf_estimates)
+all_estimates$Field_water <- all_estimates$Fresh_weight - all_estimates$Dry_weight
+# EWT is per leaf area. Multiply by LAI to get a canopy water estimate;
+# convert cm water depth to ton/ha (1 cm over 1 ha = 100 ton).
+all_estimates$Canopy_leaf_water <- all_estimates$EWT * all_estimates$LAI * 100
+
+cab_plot <- plotly::plot_ly(all_estimates, x=~N_content, y=~Cab,
+                            color=~Method, text=~Plot,
+                            showlegend=TRUE,
+                            type="scatter", mode="markers",
+                            hovertemplate="Plot %{text}<br>Measured N content: %{x:.2f} g N/m²<br>Retrieved Cab: %{y:.1f} µg/cm²<extra></extra>") |>
+  plotly::layout(title="Measured N content vs retrieved Cab",
+                 xaxis=list(title="Measured N content (g N/m²)", showticklabels=TRUE, ticks="outside", showline=TRUE),
+                 yaxis=list(title="Retrieved Cab (µg/cm²)", showticklabels=TRUE, ticks="outside", showline=TRUE))
+lai_plot <- plotly::plot_ly(all_estimates, x=~Dry_weight, y=~LAI,
+                            color=~Method, text=~Plot,
+                            showlegend=FALSE,
+                            type="scatter", mode="markers",
+                            hovertemplate="Plot %{text}<br>Measured dry biomass: %{x:.2f} ton/ha<br>Retrieved LAI: %{y:.2f} m²/m²<extra></extra>") |>
+  plotly::layout(title="Measured dry biomass vs retrieved LAI",
+                 xaxis=list(title="Measured dry biomass (ton/ha)", showticklabels=TRUE, ticks="outside", showline=TRUE),
+                 yaxis=list(title="Retrieved LAI (m²/m²)", showticklabels=TRUE, ticks="outside", showline=TRUE))
+water_plot <- plotly::plot_ly(all_estimates, x=~Field_water, y=~Canopy_leaf_water,
+                            color=~Method, text=~Plot,
+                            showlegend=FALSE,
+                            type="scatter", mode="markers",
+                            hovertemplate="Plot %{text}<br>Measured plant water (fresh − dry): %{x:.2f} ton/ha<br>Estimated leaf water scaled to canopy (EWT × LAI): %{y:.2f} ton/ha<extra></extra>") |>
+  plotly::layout(title="Measured plant water vs estimated canopy leaf water",
+                 xaxis=list(title="Measured plant water (fresh − dry, ton/ha)", showticklabels=TRUE, ticks="outside", showline=TRUE),
+                 yaxis=list(title="Estimated leaf water × LAI (ton/ha)", showticklabels=TRUE, ticks="outside", showline=TRUE))
+plotly::subplot(cab_plot, lai_plot, water_plot, nrows=3,
+                shareY=FALSE, titleX=TRUE) |>
+  plotly::layout(title="RTM trait retrievals and measured field variables (exploratory)",
+                 legend=list(orientation="v", x=1.02, xanchor="left", y=1),
+                 margin=list(r=170),
+                 height=900) |>
+  plotly::config(displayModeBar=FALSE, displaylogo=FALSE, responsive=TRUE)
+```
+
+Change `index_predictors` to try another index, or add more reflectance bands to `feature_names`. Keep the training and field predictors identical. EWT is water thickness per leaf area, so it is not directly comparable with whole-plot fresh biomass. Here we multiply EWT by LAI to estimate leaf water per ground area and compare it with measured plant water mass (fresh minus dry biomass). This remains approximate because the harvest includes stems and other material as well as leaves. To compare satellite bands instead of the 10 nm FieldSpec grid, use the sensor convolution example in Exercise 2 and retrain with the same bands on both datasets.
+
+```{block, type="question"}
+> **Question 6.** How many plots have input bands or indices outside the LUT ranges? Does retrieved Cab vary with measured N content, and LAI with dry biomass? Does the estimated leaf water per ground area follow measured plant water mass? How do RF and the classical costs compare, and what measurements would validate these estimates?
+```
+
+## Continue or review
+
+Go back to [Exercise 1: the simulator and first LUT](01-Explore-Canopy_practical.html), or revisit [Exercise 2: controlled and global sensitivity](02-Trait-Sensitivity_practical.html).
