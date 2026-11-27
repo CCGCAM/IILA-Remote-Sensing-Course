@@ -27,7 +27,7 @@ This course was **tested end-to-end with R 4.5.1**. Install R 4.5.1 or a newer s
 
 ## Open the course project
 
-Download or extract the complete `RTM-Practical-R` folder. Open `RTM-Practical-R.Rproj` by double-clicking it, or use **File > Open Project** in RStudio. Keep the `R`, `App`, `data`, `Exercises` and `Optional` subfolders together. Run `getwd()` in the Console: it should end in `RTM-Practical-R`. Work from this project rather than moving individual `.Rmd` files elsewhere.
+Download or clone the complete course repository from [GitHub](https://github.com/CCGCAM/IILA-Remote-Sensing-Course). If you download the ZIP, extract the entire folder. Open the `.Rproj` file in the top folder by double-clicking it, or use **File > Open Project** in RStudio. Keep the `R`, `App`, `data`, `Exercises` and `Optional` subfolders together. Run `getwd()` in the Console to confirm RStudio is working from the project root; `install_packages.R` should be visible there.
 
 ## Install packages once
 
@@ -50,6 +50,16 @@ library(ToolsRTM)
 
 If an installation fails, copy the first error message and ask the instructor. On Windows, if R asks to install packages from source and requests build tools, first try the precompiled binary offered by CRAN. If a GitLab download fails, check your internet connection and rerun `source("install_packages.R")`.
 
+## Do this before class
+
+Before the practical, download the repository, install R/RStudio and run `source("install_packages.R")` once. Then open this HTML guide and the three exercise HTML pages in a browser. Use them to read the steps and explore the interactive plots. The HTML pages are for preparation and reference; they do not run R code. During the practical, open each matching `.Rmd` in RStudio and run the chunks in order. If possible, test the local simulator before class with:
+
+```{r app-check, eval=FALSE}
+source("run_app.R")
+```
+
+Confirm that the app opens, then press **Stop** in RStudio. If the app or package installation fails, contact the instructor before the session.
+
 ## First activity: launch the simulator in RStudio
 
 Open `run_app.R` and click **Source** in RStudio. This runs the local app inside the downloaded project; it does not require a hosted server or an account. Alternatively type `shiny::runApp("App/RTMs")` in the Console. Wait for the Viewer or browser window to open. If the panel is narrow, use **Open in Browser**. Press **Stop** before running notebook chunks.
@@ -64,7 +74,7 @@ The simulator is a **forward model**: you choose plant properties and it predict
 
 ## How to work through an exercise
 
-Open `Exercises/01-Explore-Canopy.Rmd`. A `.Rmd` file mixes instructions, questions, R code and plots. Use the green **Run** button on a chunk to run it in the current R session. Write short answers under the questions. The supplied `_practical.html` file is a readable copy; edit the `.Rmd` in RStudio. Use **Knit** to make your own HTML. Run `source("render_exercises.R")` from the project root to rebuild the four handouts: setup plus three exercises.
+Open `Exercises/01-Explore-Canopy.Rmd`. A `.Rmd` file mixes instructions, questions, R code and plots. Use the green **Run** button on a chunk to run it in the current R session. Write short answers under the questions. The supplied `_practical.html` file is a readable copy; edit the `.Rmd` in RStudio. Run chunks in order. Participants do not need to knit the files; instructors can use `source("render_exercises.R")` from the project root to rebuild the setup and three exercise handouts.
 
 ## Reopen the simulator later
 
@@ -84,4 +94,4 @@ In **PROSAIL-WithSatellite**, compare the continuous spectrum with Sentinel-2 ba
 
 ## Sharing the project with the class
 
-The instructor can upload the **entire** `RTM-Practical-R` folder to the [course Google Drive folder](https://drive.google.com/drive/folders/1JdIGgzTBjqTVQyM7_beA8znYO33D9G0H?usp=sharing): in Drive select **New > Folder upload**, choose this folder, and wait for the upload to finish. Share the resulting folder link. Participants should download the folder (or a ZIP of it), extract it locally, and open the `.Rproj` file. Do not run the project directly from a browser preview in Drive.
+The course materials and updates are in the [IILA Remote Sensing Course GitHub repository](https://github.com/CCGCAM/IILA-Remote-Sensing-Course). Participants can download the ZIP from **Code > Download ZIP** or clone the repository with Git. After extracting, open the `.Rproj` file and run the setup steps above. Do not run the project from a browser preview; the Shiny app and R code run locally in RStudio.

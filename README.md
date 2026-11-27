@@ -1,11 +1,11 @@
-IILA \| Vegetation Remote Sensing and Radiative Transfer Modelling
-================
-
 <!-- Generated from README.Rmd. Edit the RMarkdown source rather than README.md. -->
 
 **From spectral measurements to vegetation trait retrieval**
 
-IILA Training Course \| Córdoba, Argentina \| 2026
+In-person training course **“Advanced Applications of Open Satellite
+Data”**, organised by the International Italo-Latin American
+Organization (IILA) in collaboration with the Italian Space Agency
+(ASI). Córdoba, Argentina \| **30 November–2 December 2026**.
 
 [![RTM-Suite](https://img.shields.io/badge/Framework-RTM--Suite-287D46)](https://rtm-suite.wur.nl/)
 [![R](https://img.shields.io/badge/Language-R-276DC3)](https://www.r-project.org/)
@@ -97,20 +97,59 @@ Soil, leaf and canopy properties
 
 ## Getting started
 
-1.  Install [R](https://www.r-project.org/) and
-    [RStudio](https://posit.co/download/rstudio-desktop/).
-2.  Download or clone this repository using **Code \> Download ZIP** or
-    Git.
-3.  Extract the complete repository, preserving its folder structure.
-4.  Open the course setup guide (`00-Setup_practical.html`) and follow
-    the package installation instructions.
-5.  Open the first RMarkdown exercise in RStudio.
-6.  Run the code chunks sequentially and complete the practical
-    questions.
+Use this order the first time you work with the course:
 
-The interactive simulator is launched from the exercises using
-`shiny::runApp()`. Run the simulator chunk manually rather than during
-knitting.
+1.  Install **R 4.5.1 or newer** from
+    [CRAN](https://cran.r-project.org/) and [RStudio
+    Desktop](https://posit.co/download/rstudio-desktop/). The exercises
+    were checked with R 4.5.1.
+
+2.  Get the course from the [GitHub
+    repository](https://github.com/CCGCAM/IILA-Remote-Sensing-Course):
+    select **Code \> Download ZIP**, or clone it with Git. Keep all
+    folders together when extracting the ZIP.
+
+3.  Open the `.Rproj` file in the repository’s top folder. This sets the
+    working directory so the relative file paths work.
+
+4.  In the RStudio Console, run the package installer **once**:
+
+    ``` r
+    source("install_packages.R")
+    ```
+
+    An internet connection is needed while packages and ToolsRTM are
+    installed. Wait for the `Ready` message before continuing.
+
+5.  Read `00-Setup_practical.html`. Then open
+    `Exercises/01-Explore-Canopy.Rmd` in RStudio and run its chunks from
+    top to bottom. Start the Shiny simulator from its marked chunk or
+    run `source("run_app.R")` in the Console. Stop the app before
+    continuing with the code chunks.
+
+6.  Continue with Exercises 2 and 3, running chunks in order and
+    answering each blue question box. The `_practical.html` files are
+    for reading; use the `.Rmd` files to run or change code.
+
+To reinstall after an incomplete installation, restart RStudio and run
+`source("install_packages.R")` again from the project root. You do not
+need to run `render_exercises.R` as a participant; it is for rebuilding
+the HTML handouts.
+
+### Before the class
+
+Complete the download, R/RStudio installation and package installation
+before arriving. Open `00-Setup_practical.html` and the three
+`_practical.html` exercise pages in a web browser to read the
+instructions and explore their interactive plots. HTML is the
+preparation and reference material; it does not execute R code. To run
+the exercises, open the matching `.Rmd` file in RStudio and run each
+chunk in order. If possible, run `source("run_app.R")` once before class
+and confirm that the local simulator opens.
+
+The interactive simulator runs locally in RStudio through the Shiny app
+included in this repository. It does not run as part of the static HTML
+pages.
 
 ## Repository structure
 
@@ -118,17 +157,22 @@ The following layout is recommended to preserve the relative paths used
 in the exercises:
 
 ``` text
-IILA-RTM-Training/
+IILA-Remote-Sensing-Course/
 ├── README.Rmd
 ├── README.md
+├── 0-IILA-Remote-Sensing-Course.Rproj
 ├── 00-Setup_practical.html
 ├── copy-code.html
+├── install_packages.R
+├── render_exercises.R
+├── run_app.R
 ├── Exercises/
 │   ├── 01-Explore-Canopy.Rmd
 │   ├── 02-Trait-Sensitivity.Rmd
 │   └── 03-Field-Spectra-and-Trait-Inversion.Rmd
 ├── App/
 │   └── RTMs/
+├── Optional/
 └── data/
     ├── soil_spectrum_bablet_ID1.csv
     ├── Achterhoek_FieldSpec_2008.csv
@@ -137,6 +181,9 @@ IILA-RTM-Training/
 
 ## Software and resources
 
+- [Course
+  repository](https://github.com/CCGCAM/IILA-Remote-Sensing-Course) —
+  download the materials and follow updates.
 - [RTM-Suite](https://rtm-suite.wur.nl/) — radiative transfer modelling
   framework.
 - [ToolsRTM documentation](https://rtm-suite.wur.nl/toolsrtm/) — forward
